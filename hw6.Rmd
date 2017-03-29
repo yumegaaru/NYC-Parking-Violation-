@@ -1,0 +1,156 @@
+---
+title: "HW6"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Clean Data
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+pluto = st_read("/data/nyc_parking/pluto_manhattan/", stringsAsFactors = FALSE, quiet = TRUE)
+
+plot(st_geometry(st_centroid(pluto)), pch=16, cex=0.1, col=adjustcolor("black", alpha.f = 0.1))
+
+pluto_df = pluto %>% 
+  st_centroid() %>% 
+  st_coordinates() %>% 
+  cbind(data.frame(Address=pluto$Address), .) %>%
+  mutate(Address = tolower(Address))
+
+plot(pluto_df[,2:3], pch=16, cex=0.1, col=adjustcolor("black", alpha.f = 0.1), asp=1)
+
+
+
+load("/data/nyc_parking/NYParkingViolations.Rdata")
+
+nyc_df = nyc %>%
+  select(Violation.Precinct, House.Number, Street.Name) %>%
+  mutate(Address = paste(House.Number, Street.Name)) %>%
+  select(Precinct = Violation.Precinct, Address) %>%
+  mutate(Address = tolower(Address))
+
+
+
+full = inner_join(nyc_df, pluto_df) %>% 
+  filter(Precinct >=1 & Precinct <= 34) # Manhattan Precincts
+
+ggplot(full, aes(x=X, y=Y, color=as.factor(Precinct))) +
+  geom_point(size=0.1)
+```
+
+
+## Modeling
+
+### Setup
+
+```{r}
+nybb = st_read("/data/nyc_parking/nybb/")
+
+manh = nybb %>% filter(BoroName == "Manhattan")
+
+library(raster)
+
+st_bbox(manh)
+
+rast_extent = extent(c(-74.04773,-73.90665,40.68292,40.87904))
+r = raster(rast_extent, nrow=300, ncol=100)
+
+manh_r = rasterize(as(manh,"Spatial"), r)
+manh_cells = which(!is.na(manh_r[]))
+manh_xy = xyFromCell(manh_r, manh_cells)
+
+pred_xy = data.frame(manh_xy) %>% setNames(c("X","Y"))
+
+plot(manh_xy, pch=16, cex=0.1)
+```
+
+
+### Logistic Regression
+
+```{r}
+full_log = full %>% mutate(precinct1 = (Precinct == 1)) 
+
+g = glm(precinct1 ~ poly(X,2)*poly(Y,2), family=binomial, data=full_log)
+
+r_logistic = r
+r_logistic[manh_cells] = predict(g, newdata=pred_xy, type="response")
+
+full_log_p1 = full_log %>% filter(precinct1 == TRUE)
+
+plot(r_logistic)
+#points(full_log_p1$X, full_log_p1$Y, pch=16, cex=0.5)
+```
+
+### Multiple Logistic Regressions
+
+```{r}
+precincts = sort(unique(full$Precinct))
+n_precincts = length(precincts)
+
+probs = matrix(NA, ncol=n_precincts, nrow=nrow(pred_xy))
+
+for(i in seq_along(precincts))
+{
+  cat("Precinct",precincts[i],"\n")
+  tmp = full %>% mutate(p = (Precinct == precincts[i])) 
+  g = glm(p ~ poly(X,2)*poly(Y,2), family=binomial, data=tmp)
+  
+  probs[,i] = predict(g, newdata=pred_xy, type="response")
+}
+
+precinct_index = apply(probs, 1, which.max)
+
+
+r_multi_log = r
+r_multi_log[manh_cells] = as.character(precincts[precinct_index])
+
+plot(r_multi_log)
+
+```
+
+### Multinomial Regression
+
+```{r}
+library(nnet)
+full_mn = full %>% mutate(z = as.factor(Precinct))
+
+m = multinom(z ~ X + Y + X:Y + I(X^2) + I(Y^2), data=full_mn)
+
+pred_m = predict(m, newdata=pred_xy)
+
+
+r_multi = r
+r_multi[manh_cells] = as.character(pred_m)
+
+plot(r_multi)
+```
+
+
+### xgboost
+
+```{r}
+library(xgboost)
+
+precincts = factor(full$Precinct) %>% levels()
+y = (factor(full$Precinct) %>% as.integer()) - 1L
+x = full %>% dplyr::select(X, Y) %>% as.matrix()
+
+m = xgboost(data=x, label=y, nthread=4, nround=20, objective="multi:softmax", num_class=length(precincts))
+
+xg_pred = predict(m, newdata=as.matrix(pred_xy))
+
+pred_label = precincts[xg_pred+1]
+
+r_xg = r
+r_xg[manh_cells] = as.character(pred_label)
+plot(r_xg)
+
+```
+
