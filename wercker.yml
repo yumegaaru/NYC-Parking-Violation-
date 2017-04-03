@@ -5,7 +5,7 @@ build:
     - script:
       name: Setup
       code: |
-          install2.r googlesheets
+          install2.r googlesheets geosphere
     - script:
       name: Update scores
       code: |
