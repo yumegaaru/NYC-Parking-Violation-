@@ -5,6 +5,7 @@ build:
     - script:
       name: Setup
       code: |
+          apt-get install libssl-dev
           install2.r mongolite
     - script:
       name: Update scores
