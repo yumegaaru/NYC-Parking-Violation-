@@ -151,6 +151,15 @@ pred_label = precincts[xg_pred+1]
 r_xg = r
 r_xg[manh_cells] = as.character(pred_label)
 plot(r_xg)
-
 ```
 
+
+## Scoring / Predict
+
+```{r}
+source("polygonizer.R")
+
+poly = polygonizer(r_xg)
+
+st_write(poly, dsn = "precincts.json")
+```
