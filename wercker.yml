@@ -1,0 +1,14 @@
+box: rocker/geospatial
+
+build:
+  steps:
+    - script:
+      name: Setup
+      code: |
+          apt-get install libsasl2-dev
+          install2.r mongolite
+    - script:
+      name: Update scores
+      code: |
+          wget --quiet "http://www.stat.duke.edu/~cr173/Sta323_Sp17/hw/hw6_update_score.R"
+          Rscript hw6_update_score.R $TEAM $MONGO_URL $PP_URL
