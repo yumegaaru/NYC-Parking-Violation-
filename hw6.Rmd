@@ -18,7 +18,9 @@ library(dplyr)
 library(ggplot2)
 library(readr)
 library(stringr)
-
+library(purrr)
+library(parallel)
+library(xgboost)
 ```
 
 ### Task 1 - Clean and Merge Data
@@ -60,7 +62,6 @@ pluto = pluto %>%
 #### Clean and merge data
 
 ```{r}
-
 nyc$address = 
   toupper(nyc$address) %>% str_replace_all(.,"BLVD", "BL") %>% 
   str_replace_all(.,"STREET","ST") %>%
@@ -97,12 +98,181 @@ manh_precincts = c(1,5,6,7,9,10,13,14,17,18,19,20,22,23,24,25,26,28,30,32,33,34)
 
 d = filter(d, precinct %in% manh_precincts)
 
-ggplot(d, aes(x=X, y=Y, color=as.factor(precinct))) +
-  geom_point()
 ```
 
 
-## Task 2 - Modeling and Prediction
+## Task 2 - Modeling
+
+### Setup
 
 ```{r}
+
+if (!file.exists("manh.Rdata")) {
+    
+  manh = st_read("/data/nyc_parking/nybb/nybb.shp", quiet=TRUE) %>%
+    filter(BoroName == "Manhattan")
+  
+  bbox = st_bbox(manh)
+  
+  X = seq(bbox["xmin"], bbox["xmax"], 0.00075)
+  Y = seq(bbox["ymin"], bbox["ymax"], 0.00075)
+  
+  grid = expand.grid(X=X, Y=Y) %>% 
+    as.matrix() %>%
+    st_multipoint() %>%
+    st_sfc() %>%
+    st_set_crs(st_crs(manh))
+      
+  manh_pts = st_intersection(st_geometry(manh), grid) %>% st_cast("POINT")
+   
+  manh_xy = st_coordinates(manh_pts) %>% as.data.frame()
+  
+  save(manh, manh_pts, manh_xy, file="manh.Rdata")
+} else {
+  load("manh.Rdata")
+}
+
+cp_pts = data.frame(precinct = 22,
+                    address = NA,
+                    st_intersection(cp, manh_pts) %>% 
+                      st_cast("POINT") %>% st_coordinates())
+
+d = rbind(d, cp_pts)
+```
+
+### "Multiple" Logistic Regression
+
+```{r}
+if (!file.exists("mlr_pred.Rdata")) {
+
+  d_mlr = d %>% dplyr::select(-address)
+  precincts = d_mlr$precinct %>% unique() %>% sort()
+  
+  
+  pb = dplyr::progress_estimated(length(precincts))
+  pred = map(
+    precincts,
+    function(p) {
+      pb$tick()$print()
+      d_mlr %>%
+        mutate(cur_prec = (precinct == p)) %>%
+        {suppressWarnings(glm(cur_prec ~ poly(X,2)*poly(Y,2), family=binomial, data=.))} %>%
+        predict(newdata=manh_xy, type="response")
+    }
+  )
+  
+  pred_index = do.call(cbind, pred) %>%
+    apply(1, which.max)
+
+  pred_precinct = precincts[pred_index]
+  
+  pred_df = cbind(manh_xy, precinct = pred_precinct)
+  pred_sf = st_sf(precinct = pred_precinct, geometry = manh_pts)
+  
+  save(pred_df, pred_sf, file="mlr_pred.Rdata")
+} else {
+  load("mlr_pred.Rdata")
+}
+```
+
+```{r}
+## Prediction data frame
+
+ggplot(pred_df) +
+  geom_point(aes(x=X,y=Y,color=as.factor(precinct)), size=0.1, alpha=0.5) +
+  guides(color = guide_legend(override.aes = list(size=2)))
+```
+
+```{r}
+## Prediction sf
+
+ggplot() +
+  geom_sf(data=pred_sf, aes(color=as.factor(precinct)), size=0.1, alpha=0.5) +
+  guides(color = guide_legend(override.aes = list(size=2)))
+```
+
+```{r}
+## Predicting boundaries
+
+pred_sf_mp = pred_sf %>%
+  group_by(precinct) %>%
+  summarize(geometry = list(st_cast(geometry,"MULTIPOINT")))
+
+pred_boundary = pred_sf_mp %>% st_buffer(0.00075) %>% st_buffer(-0.0006) 
+  
+  #st_intersection(st_geometry(manh))
+
+# devtools::install_github("tidyverse/ggplot2")
+ggplot() +
+  geom_sf(data=pred_boundary, aes(fill=as.factor(precinct)), alpha=0.3)
+```
+
+
+```{r}
+st_write(pred_boundary, "precincts.geojson", delete_dsn = TRUE, quiet=TRUE)
+```
+
+
+### Multinomial Regression
+
+```{r}
+# library(nnet)
+# 
+# d_mn = d %>% select(-address) %>% mutate(precinct = as.factor(precinct))
+# 
+# mn = multinom(precinct ~ poly(X,2)*poly(Y,2), data=d_mn)
+# 
+# precinct_pred = predict(mn, newdata=manh_xy)
+# 
+# pred_df = cbind(manh_xy, precinct=precinct_pred)
+# 
+# pred_sf = st_sf(precinct = precinct_pred, geometry = manh_pts)
+# 
+# ggplot(pred_df) +
+#   geom_point(aes(x=X,y=Y,color=precinct_pred), size=0.1, alpha=0.5)
+# 
+# 
+# pred_sf_mp = pred_sf %>%
+#   group_by(precinct) %>%
+#   summarize(geometry = list(st_cast(geometry,"MULTIPOINT")))
+# 
+# pred_boundary = pred_sf_mp %>% st_buffer(0.00075) %>% st_buffer(-0.0006) 
+#   
+#   #st_intersection(st_geometry(manh))
+# 
+# # devtools::install_github("tidyverse/ggplot2")
+# ggplot() +
+#   geom_sf(data=pred_boundary, aes(fill=as.factor(precinct)), alpha=0.3)
+# 
+# st_write(pred_boundary, "precincts.geojson", delete_dsn = TRUE, quiet=TRUE)
+```
+
+
+
+### xgboost
+
+```{r}
+d_xg = d %>% dplyr::select(-address) %>% mutate(precinct = as.factor(precinct))
+
+precincts = d_xg$precinct %>% levels()
+y = (d_xg$precinct %>% as.integer()) - 1L
+x = d_xg %>% dplyr::select(X,Y) %>% as.matrix()
+
+m = xgboost(data=x, label=y, nthread=4, nround=50, objective="multi:softmax", num_class=length(precincts))
+
+p_index = predict(m, newdata=as.matrix(manh_xy))
+precinct_pred = precincts[p_index+1L] %>% as.character() %>% as.integer()
+
+pred_df = cbind(manh_xy, precinct=precinct_pred)
+
+pred_sf = st_sf(precinct = precinct_pred, geometry = manh_pts)
+
+
+pred_sf_mp = pred_sf %>%
+  dplyr::group_by(precinct) %>%
+  dplyr::summarize(geometry = list(st_cast(geometry,"MULTIPOINT")))
+
+pred_boundary = pred_sf_mp %>% st_buffer(0.00075) %>% st_buffer(-0.0005)
+
+st_write(pred_boundary, "precincts.geojson", delete_dsn = TRUE, quiet=TRUE)
 ```
