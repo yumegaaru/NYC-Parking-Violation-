@@ -17,12 +17,88 @@ library(sf)
 library(dplyr)
 library(ggplot2)
 library(readr)
+library(stringr)
 
 ```
 
 ### Task 1 - Clean and Merge Data
 
+#### Parking Violation Data
+
+```{r message=FALSE}
+if (!file.exists("nyc_parking.Rdata")) {
+  nyc_raw = read_csv("/data/nyc_parking/NYParkingViolations.csv") 
+  
+  nyc = nyc_raw %>%
+    setNames(str_replace_all(names(.)," ", "_")) %>%
+    dplyr::select(Violation_Precinct, House_Number, Street_Name) %>%
+    transmute(precinct = Violation_Precinct, address = paste(House_Number, Street_Name)) %>%
+    filter(address != "") %>%
+    filter(precinct <= 34)
+  
+  save(nyc, file="nyc_parking.Rdata")
+} else {
+  load(file="nyc_parking.Rdata")
+}
+```
+
+#### Geocoding Data
+
+```{r warning=FALSE}
+pluto = st_read("/data/nyc_parking/pluto_manhattan/MNMapPLUTO.shp", quiet=TRUE, stringsAsFactors = FALSE)
+
+pluto = pluto %>%
+  st_geometry() %>%
+  st_centroid() %>%
+  st_coordinates() %>% 
+  data.frame(address = pluto$Address, ., stringsAsFactors = FALSE) %>%
+  tbl_df() %>%
+  filter(!is.na(address))
+```
+
+
+#### Clean and merge data
+
 ```{r}
+
+nyc$address = 
+  toupper(nyc$address) %>% str_replace_all(.,"BLVD", "BL") %>% 
+  str_replace_all(.,"STREET","ST") %>%
+  str_replace_all(., "AVENUE", "AVE") %>%
+  str_replace_all(.,"EAST","E") %>% 
+  str_replace_all(., "WEST", "W") %>%
+  str_replace_all(., "\\sDRIVE$", " DR") %>%
+  str_replace_all(.,"\\sPLACE$", " PL") %>%
+  str_replace_all(.,"\\sSQUARE$", " SQ") %>%
+  str_replace_all(., "AVE OF THE AMER", "6 AVE") %>%
+  str_replace_all(., "(?<=\\d)(TH|ST|ND|RD)", "") %>%
+  str_replace_all(., "BWAY", "BROADWAY")
+
+pluto$address = 
+  toupper(pluto$address) %>% str_replace_all(.,"BLVD", "BL") %>% 
+  str_replace_all(.,"STREET","ST") %>%
+  str_replace_all(., "AVENUE", "AVE") %>%
+  str_replace_all(.,"EAST","E") %>% 
+  str_replace_all(., "WEST", "W") %>%
+  str_replace_all(., "\\sDRIVE$", " DR") %>%
+  str_replace_all(.,"\\sPLACE$", " PL") %>%
+  str_replace_all(.,"\\sSQUARE$", " SQ") %>%
+  str_replace_all(., "AVE OF THE AMER", "6 AVE") %>%
+  str_replace_all(., "(?<=\\d)(TH|ST|ND|RD)", "") %>%
+  str_replace_all(., "BWAY", "BROADWAY")
+
+d = inner_join(
+  nyc,
+  pluto,
+  by="address"
+)
+
+manh_precincts = c(1,5,6,7,9,10,13,14,17,18,19,20,22,23,24,25,26,28,30,32,33,34)
+
+d = filter(d, precinct %in% manh_precincts)
+
+ggplot(d, aes(x=X, y=Y, color=as.factor(precinct))) +
+  geom_point()
 ```
 
 
