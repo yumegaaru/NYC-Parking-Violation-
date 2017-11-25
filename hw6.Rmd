@@ -132,6 +132,10 @@ if (!file.exists("manh.Rdata")) {
   load("manh.Rdata")
 }
 
+cp <- st_polygon(list(cbind(c(-73.958188, -73.949227, -73.972994, -73.981783,-73.958188),
+                            c(40.800527, 40.796904, 40.764343, 40.768075, 40.800527)))) %>% 
+  st_sfc() %>% st_set_crs(st_crs(manh))
+
 cp_pts = data.frame(precinct = 22,
                     address = NA,
                     st_intersection(cp, manh_pts) %>% 
