@@ -63,30 +63,68 @@ pluto = pluto %>%
 
 ```{r}
 nyc$address = 
-  toupper(nyc$address) %>% str_replace_all(.,"BLVD", "BL") %>% 
-  str_replace_all(.,"STREET","ST") %>%
-  str_replace_all(., "AVENUE", "AVE") %>%
+  toupper(nyc$address) %>%
+  str_replace_all(.,"BLVD", "BL") %>% 
+  str_replace_all(.,"STREET|(STREE|STRT|STRE|STR)$","ST") %>%
+  str_replace_all(., "AVENUE|(AVEN|AVENU|AV)$", "AVE") %>%
   str_replace_all(.,"EAST","E") %>% 
   str_replace_all(., "WEST", "W") %>%
-  str_replace_all(., "\\sDRIVE$", " DR") %>%
-  str_replace_all(.,"\\sPLACE$", " PL") %>%
-  str_replace_all(.,"\\sSQUARE$", " SQ") %>%
+  str_replace_all(.,"SOUTH","S") %>%
+  str_replace_all(.,"NORTH","N") %>%
+  str_replace_all(., "\\s(DRIVE|DRI|DRIV)$", " DR") %>%
+  str_replace_all(.,"\\s(PLACE|PLAC|PLACES)$", " PL") %>%
+  str_replace_all(.,"\\s(SQUARE|SQUAR|SQUARES|SQE)$", " SQ") %>%
   str_replace_all(., "AVE OF THE AMER", "6 AVE") %>%
   str_replace_all(., "(?<=\\d)(TH|ST|ND|RD)", "") %>%
   str_replace_all(., "BWAY", "BROADWAY")
 
+#here is to find the pattern like 123 E 123 adding ST at the end 
+#also if the pattern like 123 123 adding AVE at the end 
+
+nyc =nyc %>%
+  mutate(AVE = str_detect(address,"^[0-9]+\\s[0-9]+$")) %>%
+  mutate(ST = str_detect(address,"^[0-9]+\\s(E|W|N|S)\\s?[0-9]+$")) %>%
+  mutate(address = ifelse(AVE, paste(address,"AVE"), address))%>%
+  mutate(address = ifelse(ST, paste(address,"ST"), address)) %>%
+  select(-c(AVE, ST))
+
+
 pluto$address = 
-  toupper(pluto$address) %>% str_replace_all(.,"BLVD", "BL") %>% 
+  toupper(pluto$address) %>% 
+  str_replace_all(.,"BLVD", "BL") %>% 
   str_replace_all(.,"STREET","ST") %>%
   str_replace_all(., "AVENUE", "AVE") %>%
+  str_replace_all(.,"STREET|(STREE|STRT|STRE|STR)$","ST") %>%
+  str_replace_all(.,"AVENUE|(AVEN|AVENU|AV)$", "AVE") %>%
   str_replace_all(.,"EAST","E") %>% 
   str_replace_all(., "WEST", "W") %>%
-  str_replace_all(., "\\sDRIVE$", " DR") %>%
-  str_replace_all(.,"\\sPLACE$", " PL") %>%
-  str_replace_all(.,"\\sSQUARE$", " SQ") %>%
+  str_replace_all(.,"SOUTH","S") %>%
+  str_replace_all(.,"NORTH","N") %>%
+  str_replace_all(., "\\s(DRIVE|DRI|DRIV|)$", " DR") %>%
+  str_replace_all(.,"\\s(PLACE|PLAC|PLACES)$", " PL") %>%
+  str_replace_all(.,"\\s(SQUARE|SQUAR|SQUARES|SQE)$", " SQ") %>%
   str_replace_all(., "AVE OF THE AMER", "6 AVE") %>%
   str_replace_all(., "(?<=\\d)(TH|ST|ND|RD)", "") %>%
   str_replace_all(., "BWAY", "BROADWAY")
+
+# here is are some ways to improve that when the nyc has the address like "138 SPRING" make it to "138 SPRING ST"
+# however takes toooo long 
+
+# ave = pluto$address %>% 
+#   str_extract(., "\\s([A-Z])+\\sAVE") %>%
+#   str_extract(.,".*\\s")%>%str_trim() %>%
+#   na.omit() %>%
+#   unique()
+# 
+# street = pluto$address %>% 
+#   str_extract(., "\\s([A-Z])+\\sST") %>%
+#   str_extract(.,".*\\s")%>%str_trim() %>%
+#   na.omit() %>%
+#   unique()
+
+# nyc = nyc %>%
+#   mutate(address = ifelse(word(address, -1) %in% street, paste(address,"ST"), ifelse(word(address, -1) %in% street, paste(address,"AVE"), address)))
+
 
 d = inner_join(
   nyc,
@@ -97,6 +135,9 @@ d = inner_join(
 manh_precincts = c(1,5,6,7,9,10,13,14,17,18,19,20,22,23,24,25,26,28,30,32,33,34)
 
 d = filter(d, precinct %in% manh_precincts)
+
+
+
 
 ```
 
