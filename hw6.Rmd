@@ -110,17 +110,17 @@ pluto$address =
 # here is are some ways to improve that when the nyc has the address like "138 SPRING" make it to "138 SPRING ST"
 # however takes toooo long 
 
-ave = pluto$address %>%
-  str_extract(., "\\s([A-Z])+\\sAVE") %>%
-  str_extract(.,".*\\s")%>%str_trim() %>%
-  na.omit() %>%
-  unique()
-
-street = pluto$address %>%
-  str_extract(., "\\s([A-Z])+\\sST") %>%
-  str_extract(.,".*\\s")%>%str_trim() %>%
-  na.omit() %>%
-  unique()
+# ave = pluto$address %>% 
+#   str_extract(., "\\s([A-Z])+\\sAVE") %>%
+#   str_extract(.,".*\\s")%>%str_trim() %>%
+#   na.omit() %>%
+#   unique()
+# 
+# street = pluto$address %>% 
+#   str_extract(., "\\s([A-Z])+\\sST") %>%
+#   str_extract(.,".*\\s")%>%str_trim() %>%
+#   na.omit() %>%
+#   unique()
 
 # nyc = nyc %>%
 #   mutate(address = ifelse(word(address, -1) %in% street, paste(address,"ST"), ifelse(word(address, -1) %in% street, paste(address,"AVE"), address)))
@@ -131,59 +131,6 @@ d = inner_join(
   pluto,
   by="address"
 )
-
-# dis = rep(NA, 22)
-# percent = dis
-# j = 1
-# for(i in manh_precincts) {
-#   m = nyc %>%filter(precinct == i)
-#   temp = inner_join(
-#           m,
-#           pluto,
-#           by="address"
-#         )
-#   percent[j] = nrow(temp)/nrow(m)
-#   j = j+1
-# }
-
-nyc =nyc %>%
-  mutate(AVE = str_detect(address,"^[0-9]+\\s[0-9]+$")) %>%
-  mutate(ST = str_detect(address,"^[0-9]+\\s(E|W|N|S)\\s?[0-9]+$")) %>%
-  mutate(address = ifelse(AVE, paste(address,"AVE"), address))%>%
-  mutate(address = ifelse(ST, paste(address,"ST"), address)) %>%
-  select(-c(AVE, ST))%>%
-  mutate(address = ifelse(word(address, -1) %in% street, paste(address,"ST"), ifelse(word(address, -1) %in% ave, paste(address,"AVE"), address)))
-
-
-
-x = nyc %>%filter(precinct == 23)
-y = nyc %>%filter(precinct == 25)
-z = nyc %>%filter(precinct == 26)
-
-a = inner_join(
-  x,
-  pluto,
-  by="address"
-)
-b = inner_join(
-  y,
-  pluto,
-  by="address"
-)
-c = inner_join(
-  z,
-  pluto,
-  by="address"
-)
-
-bbb = subset(y, !(y$address %in% b$address))
-ccc = subset(z, !(z$address %in% c$address))
-
-aaa = aaa %>%
-  mutate(address = ifelse(word(address, -1) %in% street, paste(address,"ST"), ifelse(word(address, -1) %in% ave, paste(address,"AVE"), address)))
-
-
-
 
 manh_precincts = c(1,5,6,7,9,10,13,14,17,18,19,20,22,23,24,25,26,28,30,32,33,34)
 
