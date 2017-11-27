@@ -4,13 +4,7 @@ author: Walker Harrison, Yunlu Hao, Jae Yeon Lee
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
-### Setup
-
-```{r}
+```{r, include = FALSE, message = FALSE, warning = FALSE}
 # Load any necessary packages here
 
 library(sf)
@@ -25,9 +19,11 @@ library(xgboost)
 
 ### Task 1 - Clean and Merge Data
 
+Colin completed much of this task for us in class, including loading the parking data (and saving it so we wouldn't have to later reload it), and transforming the `pluto` data into the appropriate `sf` data type. What was left for us was to standardize the addresses in both dataframes as much as possible in order to maximize the rows we could get out of merging the two. This task was an exhibit in declining returns: some of the obvious stuff like getting rid of the ordinal text after street numbers (78 instead of 78th, for example) or turnning words like "Avenue" to "AVE" helped increase our merge from 20,000 or so rows to well over a million, but after those adjustments edge-cases like converting "BWAY" to "BROADWAY" only yielded marginal improvements. Ultimately, we were able to find 1.6 million addresses that existed in both datasets.
+
 #### Parking Violation Data
 
-```{r message=FALSE}
+```{r, message = FALSE, warning = FALSE}
 if (!file.exists("nyc_parking.Rdata")) {
   nyc_raw = read_csv("/data/nyc_parking/NYParkingViolations.csv") 
   
@@ -46,7 +42,7 @@ if (!file.exists("nyc_parking.Rdata")) {
 
 #### Geocoding Data
 
-```{r warning=FALSE}
+```{r, message = FALSE, warning = FALSE}
 pluto = st_read("/data/nyc_parking/pluto_manhattan/MNMapPLUTO.shp", quiet=TRUE, stringsAsFactors = FALSE)
 
 pluto = pluto %>%
@@ -61,32 +57,31 @@ pluto = pluto %>%
 
 #### Clean and merge data
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 nyc$address = 
   toupper(nyc$address) %>%
-  str_replace_all(.,"BLVD", "BL") %>% 
+  str_replace_all(.,"BLVD", "BL") %>%  ### turning road types into their abbreviations
   str_replace_all(.,"STREET|(STREE|STRT|STRE|STR)$","ST") %>%
   str_replace_all(., "AVENUE|(AVEN|AVENU|AV)$", "AVE") %>%
-  str_replace_all(.,"EAST","E") %>% 
+  str_replace_all(.,"EAST","E") %>% ### turning directions into their abbreviations
   str_replace_all(., "WEST", "W") %>%
   str_replace_all(.,"SOUTH","S") %>%
   str_replace_all(.,"NORTH","N") %>%
   str_replace_all(., "\\s(DRIVE|DRI|DRIV)$", " DR") %>%
   str_replace_all(.,"\\s(PLACE|PLAC|PLACES)$", " PL") %>%
   str_replace_all(.,"\\s(SQUARE|SQUAR|SQUARES|SQE)$", " SQ") %>%
-  str_replace_all(., "AVE OF THE AMER", "6 AVE") %>%
-  str_replace_all(., "(?<=\\d)(TH|ST|ND|RD)", "") %>%
+  str_replace_all(., "AVE OF THE AMER", "6 AVE") %>% ### using common name for Avenue of Americas
+  str_replace_all(., "(?<=\\d)(TH|ST|ND|RD)", "") %>% ### getting rid of ordinal text after digits
   str_replace_all(., "BWAY", "BROADWAY")
 
-#here is to find the pattern like 123 E 123 adding ST at the end 
-#also if the pattern like 123 123 adding AVE at the end 
-
+### creates boolean column for addresses likely missing the word "Ave" or "Street"
+### and then pastes those words on
 nyc =nyc %>%
   mutate(AVE = str_detect(address,"^[0-9]+\\s[0-9]+$")) %>%
   mutate(ST = str_detect(address,"^[0-9]+\\s(E|W|N|S)\\s?[0-9]+$")) %>%
   mutate(address = ifelse(AVE, paste(address,"AVE"), address))%>%
   mutate(address = ifelse(ST, paste(address,"ST"), address)) %>%
-  select(-c(AVE, ST))
+  dplyr::select(-c(AVE, ST))
 
 
 pluto$address = 
@@ -107,25 +102,6 @@ pluto$address =
   str_replace_all(., "(?<=\\d)(TH|ST|ND|RD)", "") %>%
   str_replace_all(., "BWAY", "BROADWAY")
 
-# here is are some ways to improve that when the nyc has the address like "138 SPRING" make it to "138 SPRING ST"
-# however takes toooo long 
-
-# ave = pluto$address %>% 
-#   str_extract(., "\\s([A-Z])+\\sAVE") %>%
-#   str_extract(.,".*\\s")%>%str_trim() %>%
-#   na.omit() %>%
-#   unique()
-# 
-# street = pluto$address %>% 
-#   str_extract(., "\\s([A-Z])+\\sST") %>%
-#   str_extract(.,".*\\s")%>%str_trim() %>%
-#   na.omit() %>%
-#   unique()
-
-# nyc = nyc %>%
-#   mutate(address = ifelse(word(address, -1) %in% street, paste(address,"ST"), ifelse(word(address, -1) %in% street, paste(address,"AVE"), address)))
-
-
 d = inner_join(
   nyc,
   pluto,
@@ -136,17 +112,18 @@ manh_precincts = c(1,5,6,7,9,10,13,14,17,18,19,20,22,23,24,25,26,28,30,32,33,34)
 
 d = filter(d, precinct %in% manh_precincts)
 
-
-
-
 ```
 
 
 ## Task 2 - Modeling
 
+Again, Colin did a fair amount of this for us in class, including reading in the manhattan shapefile and intersecting it over a grid of possible points. What was left for us to do in the first stage was account for Central Park, whose 22nd precinct is extremely underrepresented in the dataset since Central Park has no addresses within its borders and it's difficult to park your car in the middle of the Great Meadow. So for this section we were permitted to manually recreate the precinct's boundaries, which we did by finding the four corners of the rectangular park on Google Maps to create a closed polygon, and then binding its overlap with the manhattan points to the dataframe along with the 22nd precinct label. 
+
+In terms of modeling, rumor had it that the best results could be obtained by focusing on gradient boosting with the `xgboost` package and tuning the parameters while also doubling back to work on particularly weak precinicts based on the predictive results. 
+
 ### Setup
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 
 if (!file.exists("manh.Rdata")) {
     
@@ -185,139 +162,33 @@ cp_pts = data.frame(precinct = 22,
 d = rbind(d, cp_pts)
 ```
 
-### "Multiple" Logistic Regression
-
-```{r}
-if (!file.exists("mlr_pred.Rdata")) {
-
-  d_mlr = d %>% dplyr::select(-address)
-  precincts = d_mlr$precinct %>% unique() %>% sort()
-  
-  
-  pb = dplyr::progress_estimated(length(precincts))
-  pred = map(
-    precincts,
-    function(p) {
-      pb$tick()$print()
-      d_mlr %>%
-        mutate(cur_prec = (precinct == p)) %>%
-        {suppressWarnings(glm(cur_prec ~ poly(X,2)*poly(Y,2), family=binomial, data=.))} %>%
-        predict(newdata=manh_xy, type="response")
-    }
-  )
-  
-  pred_index = do.call(cbind, pred) %>%
-    apply(1, which.max)
-
-  pred_precinct = precincts[pred_index]
-  
-  pred_df = cbind(manh_xy, precinct = pred_precinct)
-  pred_sf = st_sf(precinct = pred_precinct, geometry = manh_pts)
-  
-  save(pred_df, pred_sf, file="mlr_pred.Rdata")
-} else {
-  load("mlr_pred.Rdata")
-}
-```
-
-```{r}
-## Prediction data frame
-
-ggplot(pred_df) +
-  geom_point(aes(x=X,y=Y,color=as.factor(precinct)), size=0.1, alpha=0.5) +
-  guides(color = guide_legend(override.aes = list(size=2)))
-```
-
-```{r}
-## Prediction sf
-
-ggplot() +
-  geom_sf(data=pred_sf, aes(color=as.factor(precinct)), size=0.1, alpha=0.5) +
-  guides(color = guide_legend(override.aes = list(size=2)))
-```
-
-```{r}
-## Predicting boundaries
-
-pred_sf_mp = pred_sf %>%
-  group_by(precinct) %>%
-  summarize(geometry = list(st_cast(geometry,"MULTIPOINT")))
-
-pred_boundary = pred_sf_mp %>% st_buffer(0.00075) %>% st_buffer(-0.0006) 
-  
-  #st_intersection(st_geometry(manh))
-
-# devtools::install_github("tidyverse/ggplot2")
-ggplot() +
-  geom_sf(data=pred_boundary, aes(fill=as.factor(precinct)), alpha=0.3)
-```
-
-
-```{r}
-st_write(pred_boundary, "precincts.geojson", delete_dsn = TRUE, quiet=TRUE)
-```
-
-
-### Multinomial Regression
-
-```{r}
-# library(nnet)
-# 
-# d_mn = d %>% select(-address) %>% mutate(precinct = as.factor(precinct))
-# 
-# mn = multinom(precinct ~ poly(X,2)*poly(Y,2), data=d_mn)
-# 
-# precinct_pred = predict(mn, newdata=manh_xy)
-# 
-# pred_df = cbind(manh_xy, precinct=precinct_pred)
-# 
-# pred_sf = st_sf(precinct = precinct_pred, geometry = manh_pts)
-# 
-# ggplot(pred_df) +
-#   geom_point(aes(x=X,y=Y,color=precinct_pred), size=0.1, alpha=0.5)
-# 
-# 
-# pred_sf_mp = pred_sf %>%
-#   group_by(precinct) %>%
-#   summarize(geometry = list(st_cast(geometry,"MULTIPOINT")))
-# 
-# pred_boundary = pred_sf_mp %>% st_buffer(0.00075) %>% st_buffer(-0.0006) 
-#   
-#   #st_intersection(st_geometry(manh))
-# 
-# # devtools::install_github("tidyverse/ggplot2")
-# ggplot() +
-#   geom_sf(data=pred_boundary, aes(fill=as.factor(precinct)), alpha=0.3)
-# 
-# st_write(pred_boundary, "precincts.geojson", delete_dsn = TRUE, quiet=TRUE)
-```
 
 
 
 ### xgboost
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo=TRUE, eval = FALSE}
 d_xg = d %>% dplyr::select(-address) %>% mutate(precinct = as.factor(precinct))
 
 precincts = d_xg$precinct %>% levels()
 y = (d_xg$precinct %>% as.integer()) - 1L
 x = d_xg %>% dplyr::select(X,Y) %>% as.matrix()
 
-m = xgboost(data=x, label=y, nthread=4, nround=50, objective="multi:softmax", num_class=length(precincts))
-
+m = xgboost(data=x, label=y, nthread = 10, nround = 100, objective="multi:softmax", num_class=length(precincts))
+  
 p_index = predict(m, newdata=as.matrix(manh_xy))
 precinct_pred = precincts[p_index+1L] %>% as.character() %>% as.integer()
-
+  
 pred_df = cbind(manh_xy, precinct=precinct_pred)
-
+  
 pred_sf = st_sf(precinct = precinct_pred, geometry = manh_pts)
-
 
 pred_sf_mp = pred_sf %>%
   dplyr::group_by(precinct) %>%
   dplyr::summarize(geometry = list(st_cast(geometry,"MULTIPOINT")))
-
+  
 pred_boundary = pred_sf_mp %>% st_buffer(0.00075) %>% st_buffer(-0.0005)
 
 st_write(pred_boundary, "precincts.geojson", delete_dsn = TRUE, quiet=TRUE)
+
 ```
