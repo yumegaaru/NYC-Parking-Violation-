@@ -19,7 +19,7 @@ library(xgboost)
 
 ### Task 1 - Clean and Merge Data
 
-Colin completed much of this task for us in class, including loading the parking data (and saving it so we wouldn't have to later reload it), and transforming the `pluto` data into the appropriate `sf` data type. What was left for us was to standardize the addresses in both dataframes as much as possible in order to maximize the rows we could get out of merging the two. This task was an exhibit in declining returns: some of the obvious stuff like getting rid of the ordinal text after street numbers (78 instead of 78th, for example) or turnning words like "Avenue" to "AVE" helped increase our merge from 20,000 or so rows to well over a million, but after those adjustments edge-cases like converting "BWAY" to "BROADWAY" only yielded marginal improvements. Ultimately, we were able to find 1.6 million addresses that existed in both datasets.
+Colin completed much of this task for us in class, including loading the parking data (and saving it so we wouldn't have to later reload it), and transforming the `pluto` data into the appropriate `sf` data type. What was left for us was to standardize the addresses in both dataframes as much as possible in order to maximize the rows we could get out of merging the two. This task was an exhibit in declining returns: some of the obvious stuff like getting rid of the ordinal text after street numbers (78 instead of 78th, for example) or turning words like "Avenue" to "AVE" helped increase our merge from 20,000 or so rows to well over a million, but after those adjustments edge-cases like converting "BWAY" to "BROADWAY" only yielded marginal improvements. Ultimately, we were able to find 1.6 million addresses that existed in both datasets.
 
 #### Parking Violation Data
 
@@ -117,9 +117,9 @@ d = filter(d, precinct %in% manh_precincts)
 
 ## Task 2 - Modeling
 
-Again, Colin did a fair amount of this for us in class, including reading in the manhattan shapefile and intersecting it over a grid of possible points. What was left for us to do in the first stage was account for Central Park, whose 22nd precinct is extremely underrepresented in the dataset since Central Park has no addresses within its borders and it's difficult to park your car in the middle of the Great Meadow. So for this section we were permitted to manually recreate the precinct's boundaries, which we did by finding the four corners of the rectangular park on Google Maps to create a closed polygon, and then binding its overlap with the manhattan points to the dataframe along with the 22nd precinct label. 
+Again, Colin did a fair amount of this for us in class, including reading in the Manhattan shapefile and intersecting it over a grid of possible points. What was left for us to do in the first stage was account for Central Park, whose 22nd precinct is extremely underrepresented in the dataset since Central Park has no addresses within its borders and it's difficult to park your car in the middle of the Great Meadow. So for this section we were permitted to manually recreate the precinct's boundaries, which we did by finding the four corners of the rectangular park on Google Maps to create a closed polygon, and then binding its overlap with the manhattan points to the dataframe along with the 22nd precinct label. 
 
-In terms of modeling, rumor had it that the best results could be obtained by focusing on gradient boosting with the `xgboost` package and tuning the parameters while also doubling back to work on particularly weak precinicts based on the predictive results. 
+In terms of modeling, rumor had it that the best results could be obtained by focusing on gradient boosting with the `xgboost` package and tuning the parameters while also doubling back to work on particularly weak precincts based on the predictive results. We ran a bunch of different iterations with `xgboost` and determined that more extreme parameters (10 threads, 100 rounds) didn't fare much better on the in-sample data, but did lead to better scores when compared to the actual precinct boundaries, so we used those for our final model. 
 
 ### Setup
 
@@ -162,19 +162,17 @@ cp_pts = data.frame(precinct = 22,
 d = rbind(d, cp_pts)
 ```
 
+### Gradient Boosting
 
-
-
-### xgboost
-
-```{r, message = FALSE, warning = FALSE, echo=TRUE, eval = FALSE}
+```{r, message = FALSE, warning = FALSE}
 d_xg = d %>% dplyr::select(-address) %>% mutate(precinct = as.factor(precinct))
 
 precincts = d_xg$precinct %>% levels()
 y = (d_xg$precinct %>% as.integer()) - 1L
 x = d_xg %>% dplyr::select(X,Y) %>% as.matrix()
 
-m = xgboost(data=x, label=y, nthread = 10, nround = 100, objective="multi:softmax", num_class=length(precincts))
+m = xgboost(data=x, label=y, nthread = 10, nround = 100, objective="multi:softmax", num_class=length(precincts),
+            verbose = 0)
   
 p_index = predict(m, newdata=as.matrix(manh_xy))
 precinct_pred = precincts[p_index+1L] %>% as.character() %>% as.integer()
@@ -189,6 +187,10 @@ pred_sf_mp = pred_sf %>%
   
 pred_boundary = pred_sf_mp %>% st_buffer(0.00075) %>% st_buffer(-0.0005)
 
-st_write(pred_boundary, "precincts.geojson", delete_dsn = TRUE, quiet=TRUE)
+#devtools::install_github("tidyverse/ggplot2")
 
+ggplot() +
+  geom_sf(data=pred_boundary, aes(fill=as.factor(precinct)), alpha=0.3)
+
+st_write(pred_boundary, "precincts.geojson", delete_dsn = TRUE, quiet=TRUE)
 ```
