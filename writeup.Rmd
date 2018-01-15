@@ -191,4 +191,5 @@ ggplot() +
   geom_sf(data=pred_boundary, aes(fill=as.factor(precinct)), alpha=0.3)
 
 st_write(pred_boundary, "precincts.geojson", delete_dsn = TRUE, quiet=TRUE)
+
 ```
