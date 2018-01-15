@@ -1,6 +1,4 @@
 ---
-title: "Sta 523 - Homework 6"
-author: Walker Harrison, Yunlu Hao, Jae Yeon Lee
 output: html_document
 ---
 
